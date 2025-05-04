@@ -9,9 +9,10 @@
 #define MATRIX_HEIGHT 8
 #define MATRIX_WIDTH 40
 #define MATRIX_PIXELS (MATRIX_WIDTH * MATRIX_HEIGHT)
-#define MAX_MESSAGE_SIZE 900
+#define MAX_MESSAGE_SIZE 600
 #define MIN_UPDATE_INTERVAL 20
 #define MAX_UPDATE_INTERVAL 500
+#define CHAR_GAP 1
 
 byte matrixPixelData[MATRIX_PIXELS * 3];
 tinyNeoPixel matrix = tinyNeoPixel(MATRIX_PIXELS, MATRIX_PIN, NEO_GRB, matrixPixelData);
@@ -30,6 +31,47 @@ int y = MATRIX_HEIGHT;
 bool display = true;
 unsigned long lastUpdate = 0;
 unsigned long updateInterval = 40;
+
+uint16_t getCharWidth(unsigned char c)
+{
+  uint16_t first = pgm_read_byte(&Picopixel.first);
+  uint16_t last = pgm_read_byte(&Picopixel.last);
+  uint8_t charWidth = 0;
+
+  if ((c >= first) && (c <= last)) // Char present in this font?
+  {
+    GFXglyph *glyph = &(((GFXglyph *)pgm_read_ptr(&Picopixel.glyph))[c - first]);
+    charWidth = pgm_read_byte(&glyph->xAdvance);
+  }
+
+  return charWidth;
+}
+
+int getTextWidth(const char *str)
+{
+  char c;
+  uint16_t width = 0;
+
+  while ((c = *str++))
+  {
+    width += getCharWidth(c) + CHAR_GAP;
+  }
+
+  if (width > 0)
+  {
+    width -= CHAR_GAP; // Remove the extra gap after the last character
+  }
+
+  return width;
+}
+
+void setMessage(const char *newMessage)
+{
+  strncpy(message, newMessage, MAX_MESSAGE_SIZE - 1);
+  message[MAX_MESSAGE_SIZE - 1] = '\0';
+  messageWidth = getTextWidth(message);
+  x = MATRIX_WIDTH;
+}
 
 void receiveEvent(int bytesReceived)
 {
@@ -53,10 +95,7 @@ void receiveEvent(int bytesReceived)
     }
     buffer[i] = '\0';
 
-    strncpy(message, buffer, MAX_MESSAGE_SIZE - 1);
-    message[MAX_MESSAGE_SIZE - 1] = '\0';
-    messageWidth = strlen(message) * 6;
-    x = MATRIX_WIDTH;
+    setMessage(buffer);
   }
   else if (command == 0x02)
   {
@@ -65,47 +104,18 @@ void receiveEvent(int bytesReceived)
   }
 }
 
-uint16_t getCharWidth(unsigned char c)
-{
-  uint8_t first = pgm_read_byte(&Picopixel.first);
-  uint8_t last = pgm_read_byte(&Picopixel.last);
-  uint8_t charWidth = 0;
-
-  if ((c >= first) && (c <= last)) // Char present in this font?
-  {
-    GFXglyph *glyph = &(((GFXglyph *)pgm_read_ptr(&Picopixel.glyph))[c - first]);
-    charWidth = pgm_read_byte(&glyph->xAdvance);
-  }
-
-  return charWidth;
-}
-
-unsigned char getTextWidth(const char *str)
-{
-  uint8_t c;
-  uint16_t width = 0;
-
-  while ((c = *str++))
-  {
-    width += getCharWidth(c);
-  }
-
-  return width;
-}
-
-void drawPixel(int16_t x, int16_t y, uint32_t color)
+void drawPixel(uint16_t x, uint16_t y, uint32_t color)
 {
   if (x < MATRIX_WIDTH && y < MATRIX_HEIGHT)
   {
-    uint8_t flippedX = MATRIX_WIDTH - 1 - x;
-    uint8_t flippedY = MATRIX_HEIGHT - 1 - y;
+    uint16_t flippedX = MATRIX_WIDTH - 1 - x;
+    uint16_t flippedY = MATRIX_HEIGHT - 1 - y;
     matrix.setPixelColor(flippedY * MATRIX_WIDTH + flippedX, color);
   }
 }
 
-void drawChar(int16_t x, int16_t y, char c, uint32_t color, uint8_t &glyphWidth)
+void drawChar(uint16_t x, uint16_t y, char c, uint32_t color, uint8_t &glyphWidth)
 {
-  char actualc = c;
   c -= (uint8_t)pgm_read_byte(&Picopixel.first);
 
   GFXglyph *glyph = &(((GFXglyph *)pgm_read_ptr(&Picopixel.glyph))[c]);
@@ -139,23 +149,15 @@ void drawChar(int16_t x, int16_t y, char c, uint32_t color, uint8_t &glyphWidth)
   glyphWidth = w;
 }
 
-void drawString(uint8_t x, uint8_t y, const char *str, uint32_t color)
+void drawString(int16_t x, int16_t y, const char *str, uint32_t color)
 {
-  while (*str)
+  while (*str && x < MATRIX_WIDTH)
   {
-    uint8_t charWidth;
+    uint8_t charWidth = 0;
     drawChar(x, y, *str, color, charWidth);
-    x += charWidth + 1;
+    x += charWidth + CHAR_GAP;
     str++;
   }
-}
-
-void setMessage(const char *newMessage)
-{
-  strncpy(message, newMessage, MAX_MESSAGE_SIZE - 1);
-  message[MAX_MESSAGE_SIZE - 1] = '\0';
-  messageWidth = getTextWidth(message);
-  x = MATRIX_WIDTH;
 }
 
 void setup()
@@ -163,7 +165,7 @@ void setup()
   Wire.begin(I2C_ADDRESS);
   Wire.onReceive(receiveEvent);
 
-  setMessage("The news is nigh!");
+  setMessage("Once upon a midnight dreary, while I pondered, weak and weary, over many a quaint and curious volume of forgotten lore. While I nodded, nearly napping, suddenly there came a tapping, as of some one gently rapping, rapping at my chamber door. \"Tis some visitor,\" I muttered, \"tapping at my chamber door. Only this and nothing more.\"");
 
   pinMode(LED_VIN_PIN, INPUT);
   pinMode(MATRIX_PIN, OUTPUT);
@@ -193,9 +195,10 @@ void loop()
   drawString(x, MATRIX_HEIGHT - 2, message, Colors[messageColor]);
   matrix.show();
 
+  //if (--x < -messageWidth)
   if (--x < -messageWidth)
   {
-    x = MATRIX_WIDTH;
+    x = MATRIX_WIDTH + CHAR_GAP; // Reset position with a gap before restarting
     messageColor = (messageColor + 1) % ColorCount;
   }
 }
