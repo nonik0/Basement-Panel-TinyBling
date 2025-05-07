@@ -9,7 +9,7 @@
 #define MATRIX_HEIGHT 8
 #define MATRIX_WIDTH 40
 #define MATRIX_PIXELS (MATRIX_WIDTH * MATRIX_HEIGHT)
-#define MAX_MESSAGE_SIZE 600
+#define MAX_MESSAGE_SIZE 325
 #define MIN_UPDATE_INTERVAL 20
 #define MAX_UPDATE_INTERVAL 500
 #define CHAR_GAP 1
@@ -78,6 +78,9 @@ void receiveEvent(int bytesReceived)
   if (bytesReceived < 2)
     return;
 
+  static char buffer[MAX_MESSAGE_SIZE];
+  static int bufferIndex = 0;
+
   uint8_t command = Wire.read();
   if (command == 0x00)
   {
@@ -86,16 +89,27 @@ void receiveEvent(int bytesReceived)
   }
   else if (command == 0x01)
   {
-    char buffer[MAX_MESSAGE_SIZE];
-
-    int i = 0;
-    while (Wire.available() && i < MAX_MESSAGE_SIZE - 1)
+    // read chunk into buffer, discard extra bytes if past buffer size
+    while (Wire.available())
     {
-      buffer[i++] = Wire.read();
+      uint8_t byte = Wire.read();
+      if (bufferIndex < MAX_MESSAGE_SIZE - 1)
+      {
+        buffer[bufferIndex++] = byte;
+      }
     }
-    buffer[i] = '\0';
+    buffer[bufferIndex] = '\0';
 
-    setMessage(buffer);
+    // last chunk (or buffer overflow)
+    if (bufferIndex > 0 && (buffer[bufferIndex - 1] == '\n' || bufferIndex >= MAX_MESSAGE_SIZE - 1))
+    {
+      if (buffer[bufferIndex - 1] == '\n') {
+        buffer[--bufferIndex] = '\0';
+      }
+
+      setMessage(buffer);
+      bufferIndex = 0;
+    }
   }
   else if (command == 0x02)
   {
