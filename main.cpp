@@ -9,10 +9,9 @@
 #define MATRIX_HEIGHT 8
 #define MATRIX_WIDTH 40
 #define MATRIX_PIXELS (MATRIX_WIDTH * MATRIX_HEIGHT)
-#define MAX_MESSAGE_SIZE 325
-#define MIN_UPDATE_INTERVAL 20
+#define MAX_MESSAGE_SIZE 350
+#define MIN_UPDATE_INTERVAL 5
 #define MAX_UPDATE_INTERVAL 500
-#define CHAR_GAP 1
 
 byte matrixPixelData[MATRIX_PIXELS * 3];
 tinyNeoPixel matrix = tinyNeoPixel(MATRIX_PIXELS, MATRIX_PIN, NEO_GRB, matrixPixelData);
@@ -30,9 +29,9 @@ int x = MATRIX_WIDTH;
 int y = MATRIX_HEIGHT;
 bool display = true;
 unsigned long lastUpdate = 0;
-unsigned long updateInterval = 40;
+unsigned long updateInterval = 25;
 
-uint16_t getCharWidth(unsigned char c)
+uint8_t getCharWidth(unsigned char c)
 {
   uint16_t first = pgm_read_byte(&Picopixel.first);
   uint16_t last = pgm_read_byte(&Picopixel.last);
@@ -51,17 +50,10 @@ int getTextWidth(const char *str)
 {
   char c;
   uint16_t width = 0;
-
   while ((c = *str++))
   {
-    width += getCharWidth(c) + CHAR_GAP;
+    width += getCharWidth(c);
   }
-
-  if (width > 0)
-  {
-    width -= CHAR_GAP; // Remove the extra gap after the last character
-  }
-
   return width;
 }
 
@@ -103,7 +95,8 @@ void receiveEvent(int bytesReceived)
     // last chunk (or buffer overflow)
     if (bufferIndex > 0 && (buffer[bufferIndex - 1] == '\n' || bufferIndex >= MAX_MESSAGE_SIZE - 1))
     {
-      if (buffer[bufferIndex - 1] == '\n') {
+      if (buffer[bufferIndex - 1] == '\n')
+      {
         buffer[--bufferIndex] = '\0';
       }
 
@@ -130,9 +123,15 @@ void drawPixel(uint16_t x, uint16_t y, uint32_t color)
 
 void drawChar(uint16_t x, uint16_t y, char c, uint32_t color, uint8_t &glyphWidth)
 {
-  c -= (uint8_t)pgm_read_byte(&Picopixel.first);
+  uint8_t first = pgm_read_byte(&Picopixel.first);
+  uint8_t last = pgm_read_byte(&Picopixel.last);
+  if ((c < first) || (c > last)) // Char present in this font?
+  {
+    glyphWidth = 0;
+    return;
+  }
 
-  GFXglyph *glyph = &(((GFXglyph *)pgm_read_ptr(&Picopixel.glyph))[c]);
+  GFXglyph *glyph = &(((GFXglyph *)pgm_read_ptr(&Picopixel.glyph))[c - first]);
   uint8_t *bitmap = (uint8_t *)pgm_read_ptr(&Picopixel.bitmap);
   int count = 0;
 
@@ -160,7 +159,7 @@ void drawChar(uint16_t x, uint16_t y, char c, uint32_t color, uint8_t &glyphWidt
     }
   }
 
-  glyphWidth = w;
+  glyphWidth = (uint8_t)pgm_read_byte(&glyph->xAdvance);
 }
 
 void drawString(int16_t x, int16_t y, const char *str, uint32_t color)
@@ -169,7 +168,7 @@ void drawString(int16_t x, int16_t y, const char *str, uint32_t color)
   {
     uint8_t charWidth = 0;
     drawChar(x, y, *str, color, charWidth);
-    x += charWidth + CHAR_GAP;
+    x += charWidth;
     str++;
   }
 }
@@ -209,10 +208,9 @@ void loop()
   drawString(x, MATRIX_HEIGHT - 2, message, Colors[messageColor]);
   matrix.show();
 
-  //if (--x < -messageWidth)
   if (--x < -messageWidth)
   {
-    x = MATRIX_WIDTH + CHAR_GAP; // Reset position with a gap before restarting
+    x = MATRIX_WIDTH;
     messageColor = (messageColor + 1) % ColorCount;
   }
 }
